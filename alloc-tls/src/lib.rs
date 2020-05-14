@@ -68,7 +68,9 @@ macro_rules! alloc_thread_local {
 
             unsafe fn __drop() { $name.drop(); }
 
-            thread_local!{ static DROPPER: $crate::CallOnDrop = unsafe { $crate::CallOnDrop::new(__drop) }; }
+            // Don't conflict with the #[thread_local] attribute
+            use ::std::thread_local as std_thread_local;
+            std_thread_local!{ static DROPPER: $crate::CallOnDrop = unsafe { $crate::CallOnDrop::new(__drop) }; }
 
             // DROPPER will only be dropped if it is first initialized, so we provide this function
             // to be called when the TLSSlot is first initialized. The act of calling DROPPER.with
@@ -248,8 +250,8 @@ impl<T> TLSSlot<T> {
     #[doc(hidden)]
     #[cold]
     pub unsafe fn with_slow<R, F: FnOnce(&T) -> R>(&self, f: F) -> Option<R> {
-        let ptr = self.slot.get();
-        match &*ptr {
+        let slot = self.slot.get();
+        match &*slot {
             // this branch should never be taken because if we're in state Initialized, then
             // self.ptr should be non-NULL, so we should have taken the fast path in with.
             &TLSValue::Initialized(_) => unreachable!(),
@@ -259,9 +261,9 @@ impl<T> TLSSlot<T> {
                 // access to this TLS value will detect that the value is in state
                 // Initializing, the call to with will return None, and a fallback path can be
                 // taken.
-                *ptr = TLSValue::Initializing;
-                *ptr = TLSValue::Initialized((self.init)());
-                if let &TLSValue::Initialized(ref t) = &*ptr {
+                *slot = TLSValue::Initializing;
+                *slot = TLSValue::Initialized((self.init)());
+                if let &TLSValue::Initialized(ref t) = &*slot {
                     *self.ptr.get() = t as *const _;
                 }
                 (self.register_dtor)();
